@@ -356,9 +356,10 @@ class _DashboardPageState extends State<DashboardPage> {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: isConnected
-                ? Colors.green.withOpacity(0.1)
-                : Colors.red.withOpacity(0.1),
+            color:
+                isConnected
+                    ? Colors.green.withOpacity(0.1)
+                    : Colors.red.withOpacity(0.1),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: isConnected ? Colors.green : Colors.red,
@@ -447,10 +448,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     padding: const EdgeInsets.only(left: 4, bottom: 2),
                     child: Text(
                       unit,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                     ),
                   ),
               ],

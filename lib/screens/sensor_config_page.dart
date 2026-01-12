@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../theme/app_color.dart';
 import '../widgets/kontrol_widgets.dart';
 import '../services/kontrol_storage.dart';
+import '../services/firebase_database_service.dart';
+import '../services/kontrol_automation_service.dart';
 
 class SensorConfigPage extends StatefulWidget {
   final String potName;
@@ -18,8 +20,13 @@ class SensorConfigPage extends StatefulWidget {
 }
 
 class _SensorConfigPageState extends State<SensorConfigPage> {
+  final FirebaseDatabaseService _dbService = FirebaseDatabaseService();
+  final KontrolAutomationService _automationService =
+      KontrolAutomationService();
+
   bool _isSaved = false;
   bool _isLoading = true;
+  bool _isSensorModeActive = false;
 
   // Konfigurasi sensor untuk pot ini
   Map<String, dynamic> _sensorConfig = {
@@ -33,6 +40,7 @@ class _SensorConfigPageState extends State<SensorConfigPage> {
   void initState() {
     super.initState();
     _loadSavedConfig();
+    _loadSensorModeStatus();
   }
 
   Future<void> _loadSavedConfig() async {
@@ -61,6 +69,17 @@ class _SensorConfigPageState extends State<SensorConfigPage> {
           loadedData['batasMinimal'] != '30' ||
           loadedData['batasMaksimal'] != '80';
     });
+  }
+
+  Future<void> _loadSensorModeStatus() async {
+    try {
+      final kontrolConfig = await _dbService.getKontrolConfig();
+      setState(() {
+        _isSensorModeActive = kontrolConfig['otomatis'] ?? false;
+      });
+    } catch (e) {
+      debugPrint('Error loading sensor mode status: $e');
+    }
   }
 
   @override
@@ -132,6 +151,91 @@ class _SensorConfigPageState extends State<SensorConfigPage> {
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                             color: AppColor.textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Toggle Mode Sensor
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color:
+                                _isSensorModeActive
+                                    ? AppColor.primary.withOpacity(0.1)
+                                    : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color:
+                                  _isSensorModeActive
+                                      ? AppColor.primary
+                                      : Colors.grey.shade300,
+                              width: 2,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                _isSensorModeActive
+                                    ? Icons.sensors
+                                    : Icons.sensors_outlined,
+                                color:
+                                    _isSensorModeActive
+                                        ? AppColor.primary
+                                        : Colors.grey,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Mode Sensor',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        color:
+                                            _isSensorModeActive
+                                                ? AppColor.primary
+                                                : Colors.grey.shade700,
+                                      ),
+                                    ),
+                                    Text(
+                                      _isSensorModeActive
+                                          ? 'Aktif - Monitoring otomatis'
+                                          : 'Nonaktif',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch(
+                                value: _isSensorModeActive,
+                                onChanged: (value) async {
+                                  setState(() => _isSensorModeActive = value);
+                                  try {
+                                    await _dbService.setOtomatis(value);
+                                    if (value) {
+                                      _automationService.startSensorMode();
+                                    } else {
+                                      _automationService.stopSensorMode();
+                                    }
+                                  } catch (e) {
+                                    setState(
+                                      () => _isSensorModeActive = !value,
+                                    );
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Error: $e'),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
+                                  }
+                                },
+                                activeColor: AppColor.primary,
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -458,23 +562,42 @@ class _SensorConfigPageState extends State<SensorConfigPage> {
   }
 
   Future<void> _handleSaveOrUpdate() async {
-    // Save to storage
-    await KontrolStorage.saveSensorConfig(widget.potName, _sensorConfig);
+    try {
+      // Save to local storage
+      await KontrolStorage.saveSensorConfig(widget.potName, _sensorConfig);
 
-    setState(() {
-      _isSaved = true;
-    });
+      // Update Firebase dengan konfigurasi sensor
+      await _dbService.setThreshold(
+        batasAtas: int.tryParse(_sensorConfig['batasMaksimal']) ?? 80,
+        batasBawah: int.tryParse(_sensorConfig['batasMinimal']) ?? 30,
+      );
 
-    if (!mounted) return;
+      await _dbService.updateKontrolConfig({'otomatis': _isSensorModeActive});
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Konfigurasi ${widget.potName} berhasil ${_isSaved ? 'diupdate' : 'disimpan'}',
+      setState(() {
+        _isSaved = true;
+      });
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '✓ Konfigurasi ${widget.potName} berhasil ${_isSaved ? 'diupdate' : 'disimpan'}',
+          ),
+          backgroundColor: AppColor.primary,
         ),
-        backgroundColor: AppColor.primary,
-      ),
-    );
+      );
+
+      // Start automation jika mode aktif
+      if (_isSensorModeActive) {
+        _automationService.startSensorMode();
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   Future<void> _copyToAllPots() async {

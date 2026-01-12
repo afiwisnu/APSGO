@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../theme/app_color.dart';
 import '../widgets/kontrol_widgets.dart';
 import '../services/kontrol_storage.dart';
+import '../services/firebase_database_service.dart';
+import '../services/kontrol_automation_service.dart';
 
 class WaktuConfigPage extends StatefulWidget {
   final String potName;
@@ -18,8 +20,13 @@ class WaktuConfigPage extends StatefulWidget {
 }
 
 class _WaktuConfigPageState extends State<WaktuConfigPage> {
+  final FirebaseDatabaseService _dbService = FirebaseDatabaseService();
+  final KontrolAutomationService _automationService =
+      KontrolAutomationService();
+
   bool _isSaved = false;
   bool _isLoading = true;
+  bool _isWaktuModeActive = false;
 
   // 2 Jadwal penyiraman untuk pot ini
   List<Map<String, dynamic>> _jadwalPenyiraman = [
@@ -43,6 +50,7 @@ class _WaktuConfigPageState extends State<WaktuConfigPage> {
   void initState() {
     super.initState();
     _loadSavedConfig();
+    _loadWaktuModeStatus();
   }
 
   Future<void> _loadSavedConfig() async {
@@ -74,6 +82,17 @@ class _WaktuConfigPageState extends State<WaktuConfigPage> {
           loadedData[0]['pompaAir'] ||
           loadedData[0]['pompaPupuk'];
     });
+  }
+
+  Future<void> _loadWaktuModeStatus() async {
+    try {
+      final kontrolConfig = await _dbService.getKontrolConfig();
+      setState(() {
+        _isWaktuModeActive = kontrolConfig['waktu'] ?? false;
+      });
+    } catch (e) {
+      debugPrint('Error loading waktu mode status: $e');
+    }
   }
 
   @override
@@ -145,6 +164,91 @@ class _WaktuConfigPageState extends State<WaktuConfigPage> {
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                             color: AppColor.textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Toggle Mode Waktu
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color:
+                                _isWaktuModeActive
+                                    ? AppColor.primary.withOpacity(0.1)
+                                    : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color:
+                                  _isWaktuModeActive
+                                      ? AppColor.primary
+                                      : Colors.grey.shade300,
+                              width: 2,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                _isWaktuModeActive
+                                    ? Icons.schedule
+                                    : Icons.schedule_outlined,
+                                color:
+                                    _isWaktuModeActive
+                                        ? AppColor.primary
+                                        : Colors.grey,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Mode Waktu',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        color:
+                                            _isWaktuModeActive
+                                                ? AppColor.primary
+                                                : Colors.grey.shade700,
+                                      ),
+                                    ),
+                                    Text(
+                                      _isWaktuModeActive
+                                          ? 'Aktif - Penyiraman otomatis'
+                                          : 'Nonaktif',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch(
+                                value: _isWaktuModeActive,
+                                onChanged: (value) async {
+                                  setState(() => _isWaktuModeActive = value);
+                                  try {
+                                    await _dbService.updateKontrolConfig({
+                                      'waktu': value,
+                                    });
+                                    if (value) {
+                                      _automationService.startWaktuMode();
+                                    } else {
+                                      _automationService.stopWaktuMode();
+                                    }
+                                  } catch (e) {
+                                    setState(() => _isWaktuModeActive = !value);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Error: $e'),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
+                                  }
+                                },
+                                activeColor: AppColor.primary,
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -445,23 +549,67 @@ class _WaktuConfigPageState extends State<WaktuConfigPage> {
   }
 
   Future<void> _handleSaveOrUpdate() async {
-    // Save to storage
-    await KontrolStorage.saveWaktuConfig(widget.potName, _jadwalPenyiraman);
+    try {
+      // Save to local storage
+      await KontrolStorage.saveWaktuConfig(widget.potName, _jadwalPenyiraman);
 
-    setState(() {
-      _isSaved = true;
-    });
+      // Convert durasi to seconds untuk Firebase
+      final durasi1Detik = _convertToSeconds(
+        _jadwalPenyiraman[0]['durasi'],
+        _jadwalPenyiraman[0]['durasiUnit'],
+      );
+      final durasi2Detik = _convertToSeconds(
+        _jadwalPenyiraman[1]['durasi'],
+        _jadwalPenyiraman[1]['durasiUnit'],
+      );
 
-    if (!mounted) return;
+      // Update Firebase dengan konfigurasi waktu
+      await _dbService.updateKontrolConfig({
+        'waktu_1': _jadwalPenyiraman[0]['jamMulai'],
+        'waktu_2': _jadwalPenyiraman[1]['jamMulai'],
+        'durasi_1': durasi1Detik,
+        'durasi_2': durasi2Detik,
+        'waktu': _isWaktuModeActive,
+      });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Konfigurasi ${widget.potName} berhasil ${_isSaved ? 'diupdate' : 'disimpan'}',
+      setState(() {
+        _isSaved = true;
+      });
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '✓ Konfigurasi ${widget.potName} berhasil ${_isSaved ? 'diupdate' : 'disimpan'}',
+          ),
+          backgroundColor: AppColor.primary,
         ),
-        backgroundColor: AppColor.primary,
-      ),
-    );
+      );
+
+      // Start automation jika mode aktif
+      if (_isWaktuModeActive) {
+        _automationService.startWaktuMode();
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  int _convertToSeconds(String durasi, String unit) {
+    final value = int.tryParse(durasi) ?? 10;
+    switch (unit) {
+      case 'detik':
+        return value;
+      case 'menit':
+        return value * 60;
+      case 'jam':
+        return value * 3600;
+      default:
+        return value * 60;
+    }
   }
 
   Future<void> _copyToAllPots() async {

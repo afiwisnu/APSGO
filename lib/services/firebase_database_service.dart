@@ -9,14 +9,12 @@ class FirebaseDatabaseService {
   final DatabaseReference _database = FirebaseDatabase.instance.ref();
 
   // ==================== SENSOR DATA ====================
-  
+
   /// Get real-time stream of sensor data
   Stream<Map<String, dynamic>> getSensorDataStream() {
     return _database.child('data').onValue.map((event) {
       if (event.snapshot.value != null) {
-        final data = Map<String, dynamic>.from(
-          event.snapshot.value as Map,
-        );
+        final data = Map<String, dynamic>.from(event.snapshot.value as Map);
         return {
           'suhu': _parseValue(data['suhu']),
           'kelembapan': _parseValue(data['kelembapan']),
@@ -56,14 +54,12 @@ class FirebaseDatabaseService {
   }
 
   // ==================== AKTUATOR CONTROL ====================
-  
+
   /// Get real-time stream of aktuator status
   Stream<Map<String, bool>> getAktuatorStream() {
     return _database.child('aktuator').onValue.map((event) {
       if (event.snapshot.value != null) {
-        final data = Map<String, dynamic>.from(
-          event.snapshot.value as Map,
-        );
+        final data = Map<String, dynamic>.from(event.snapshot.value as Map);
         return {
           'mosvet_1': data['mosvet_1'] ?? false, // Pompa Air
           'mosvet_2': data['mosvet_2'] ?? false, // Pompa Pupuk
@@ -88,8 +84,50 @@ class FirebaseDatabaseService {
     }
   }
 
+  /// Set pompa air (mosvet_1)
+  Future<void> setPompaAir(bool value) async {
+    await setAktuator('mosvet_1', value);
+  }
+
+  /// Set pompa pupuk (mosvet_2)
+  Future<void> setPompaPupuk(bool value) async {
+    await setAktuator('mosvet_2', value);
+  }
+
+  /// Set pot/valve (mosvet_3 to mosvet_7 untuk POT 1-5)
+  /// potNumber: 1-5
+  Future<void> setPot(int potNumber, bool value) async {
+    if (potNumber < 1 || potNumber > 5) {
+      throw ArgumentError('Pot number must be between 1 and 5');
+    }
+    await setAktuator('mosvet_${potNumber + 2}', value);
+  }
+
+  /// Set multiple aktuator at once
+  Future<void> setMultipleAktuator(Map<String, bool> aktuatorStates) async {
+    try {
+      await _database.child('aktuator').update(aktuatorStates);
+    } catch (e) {
+      print('Error setting multiple aktuator: $e');
+      rethrow;
+    }
+  }
+
+  /// Matikan semua aktuator
+  Future<void> turnOffAllAktuator() async {
+    await setMultipleAktuator({
+      'mosvet_1': false,
+      'mosvet_2': false,
+      'mosvet_3': false,
+      'mosvet_4': false,
+      'mosvet_5': false,
+      'mosvet_6': false,
+      'mosvet_7': false,
+    });
+  }
+
   // ==================== KONTROL CONFIG ====================
-  
+
   /// Get real-time stream of kontrol configuration
   Stream<Map<String, dynamic>> getKontrolStream() {
     return _database.child('kontrol').onValue.map((event) {
@@ -178,7 +216,7 @@ class FirebaseDatabaseService {
   }
 
   // ==================== HELPER FUNCTIONS ====================
-  
+
   /// Parse value dari Firebase (handle empty string)
   String _parseValue(dynamic value) {
     if (value == null || value == '') {
