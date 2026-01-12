@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "217854138058",
+    "project_id": "project-ta-951b4",
+    "storage_bucket": "project-ta-951b4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:217854138058:android:b8bd92665b1766ad0c4633",
+        "android_client_info": {
+          "package_name": "com.kampus.apsgo"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "217854138058-ml03se7pied9l9k3jcb5cpgl2bn3rto0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCrJAAUZAPettM5AwPbV3rAGlT4Jx922m8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "217854138058-ml03se7pied9l9k3jcb5cpgl2bn3rto0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
