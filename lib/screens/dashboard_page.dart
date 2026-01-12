@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_color.dart';
 import '../services/auth_service.dart';
+import '../services/firebase_database_service.dart';
 import 'kontrol_page.dart';
 import 'histori_page.dart';
 
@@ -13,6 +14,7 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   int _selectedIndex = 0;
+  final _dbService = FirebaseDatabaseService();
 
   final List<Map<String, dynamic>> _pages = [
     {'title': 'Dashboard', 'icon': Icons.dashboard},
@@ -248,47 +250,152 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildDashboard() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Sensor Cards - Temperature, Humidity, Light
-          _buildSensorCard(
-            title: "Temperature",
-            value: "30",
-            icon: Icons.thermostat_outlined,
-            color: Colors.orange,
-          ),
-          _buildSensorCard(
-            title: "Humidity",
-            value: "70",
-            icon: Icons.water_drop_outlined,
-            color: Colors.blue,
-          ),
-          _buildSensorCard(
-            title: "Light",
-            value: "85",
-            icon: Icons.wb_sunny_outlined,
-            color: Colors.amber,
-          ),
+    return StreamBuilder<Map<String, dynamic>>(
+      stream: _dbService.getSensorDataStream(),
+      builder: (context, snapshot) {
+        // Loading state
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-          const SizedBox(height: 12),
+        // Error state
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline, size: 48, color: Colors.red),
+                const SizedBox(height: 16),
+                Text('Error: ${snapshot.error}'),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => setState(() {}),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          );
+        }
 
-          // Pot Cards - Pot 1 to Pot 5
-          _buildPotCard(potNumber: 1, soilMoisture: "45"),
-          _buildPotCard(potNumber: 2, soilMoisture: "52"),
-          _buildPotCard(potNumber: 3, soilMoisture: "38"),
-          _buildPotCard(potNumber: 4, soilMoisture: "61"),
-          _buildPotCard(potNumber: 5, soilMoisture: "48"),
-        ],
-      ),
+        // No data state
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.cloud_off, size: 48, color: Colors.grey),
+                SizedBox(height: 16),
+                Text('No data available'),
+              ],
+            ),
+          );
+        }
+
+        final data = snapshot.data!;
+        final suhu = data['suhu'] ?? '0';
+        final kelembapan = data['kelembapan'] ?? '0';
+        final ldr = data['ldr'] ?? '0';
+        final soil1 = data['soil_1'] ?? '0';
+        final soil2 = data['soil_2'] ?? '0';
+        final soil3 = data['soil_3'] ?? '0';
+        final soil4 = data['soil_4'] ?? '0';
+        final soil5 = data['soil_5'] ?? '0';
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Connection Status Indicator
+              _buildConnectionStatus(),
+              const SizedBox(height: 8),
+
+              // Sensor Cards - Temperature, Humidity, Light
+              _buildSensorCard(
+                title: "Temperature",
+                value: suhu,
+                unit: "°C",
+                icon: Icons.thermostat_outlined,
+                color: Colors.orange,
+              ),
+              _buildSensorCard(
+                title: "Humidity",
+                value: kelembapan,
+                unit: "%",
+                icon: Icons.water_drop_outlined,
+                color: Colors.blue,
+              ),
+              _buildSensorCard(
+                title: "Light",
+                value: ldr,
+                unit: "%",
+                icon: Icons.wb_sunny_outlined,
+                color: Colors.amber,
+              ),
+
+              const SizedBox(height: 12),
+
+              // Pot Cards - Pot 1 to Pot 5
+              _buildPotCard(potNumber: 1, soilMoisture: soil1),
+              _buildPotCard(potNumber: 2, soilMoisture: soil2),
+              _buildPotCard(potNumber: 3, soilMoisture: soil3),
+              _buildPotCard(potNumber: 4, soilMoisture: soil4),
+              _buildPotCard(potNumber: 5, soilMoisture: soil5),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildConnectionStatus() {
+    return StreamBuilder<bool>(
+      stream: _dbService.getConnectionStatus(),
+      builder: (context, snapshot) {
+        final isConnected = snapshot.data ?? false;
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isConnected
+                ? Colors.green.withOpacity(0.1)
+                : Colors.red.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isConnected ? Colors.green : Colors.red,
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: isConnected ? Colors.green : Colors.red,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                isConnected ? 'Connected' : 'Disconnected',
+                style: TextStyle(
+                  color: isConnected ? Colors.green : Colors.red,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Widget _buildSensorCard({
     required String title,
     required String value,
+    String unit = '',
     required IconData icon,
     required Color color,
   }) {
@@ -325,9 +432,28 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ),
             ),
-            Text(
-              value,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (unit.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 2),
+                    child: Text(
+                      unit,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ],
         ),

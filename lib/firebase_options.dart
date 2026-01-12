@@ -50,6 +50,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '217854138058',
     projectId: 'project-ta-951b4',
     storageBucket: 'project-ta-951b4.firebasestorage.app',
+    databaseURL: 'https://project-ta-951b4-default-rtdb.firebaseio.com',
   );
 
   // Pilih project Anda > Project Settings > Your apps > Android app
@@ -60,6 +61,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '217854138058',
     projectId: 'project-ta-951b4',
     storageBucket: 'project-ta-951b4.firebasestorage.app',
+    databaseURL: 'https://project-ta-951b4-default-rtdb.firebaseio.com',
     iosBundleId: 'com.kampus.apsgo',
   );
 
@@ -69,6 +71,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '217854138058',
     projectId: 'project-ta-951b4',
     authDomain: 'project-ta-951b4.firebaseapp.com',
+    databaseURL: 'https://project-ta-951b4-default-rtdb.firebaseio.com',
     storageBucket: 'project-ta-951b4.firebasestorage.app',
     measurementId: 'G-6ML8QQEGNZ',
   );
@@ -79,6 +82,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '217854138058',
     projectId: 'project-ta-951b4',
     storageBucket: 'project-ta-951b4.firebasestorage.app',
+    databaseURL: 'https://project-ta-951b4-default-rtdb.firebaseio.com',
     iosBundleId: 'com.example.projectTa',
   );
 
@@ -87,6 +91,7 @@ class DefaultFirebaseOptions {
     appId: '1:217854138058:web:233d93e01272a0870c4633',
     messagingSenderId: '217854138058',
     projectId: 'project-ta-951b4',
+    databaseURL: 'https://project-ta-951b4-default-rtdb.firebaseio.com',
     authDomain: 'project-ta-951b4.firebaseapp.com',
     storageBucket: 'project-ta-951b4.firebasestorage.app',
     measurementId: 'G-SB8J6ZZQHZ',
