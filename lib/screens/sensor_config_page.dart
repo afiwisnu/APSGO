@@ -33,7 +33,8 @@ class _SensorConfigPageState extends State<SensorConfigPage> {
     'batasMinimal': '30',
     'batasMaksimal': '80',
     'durasi': '10',
-    'durasiUnit': 'menit',
+    'durasiUnit': 'detik',
+    'mode': 'smart', // 'smart' or 'fixed'
   };
 
   @override
@@ -54,11 +55,16 @@ class _SensorConfigPageState extends State<SensorConfigPage> {
         final parts = durasiStr.split(' ');
         loadedData['durasi'] = parts[0]; // Extract number
         loadedData['durasiUnit'] =
-            parts.length > 1 ? parts[1] : 'menit'; // Extract unit
+            parts.length > 1 ? parts[1] : 'detik'; // Extract unit
       } else {
         // If no unit, ensure durasiUnit exists
-        loadedData['durasiUnit'] = loadedData['durasiUnit'] ?? 'menit';
+        loadedData['durasiUnit'] = loadedData['durasiUnit'] ?? 'detik';
       }
+    }
+
+    // Ensure mode exists (default to smart)
+    if (!loadedData.containsKey('mode') || loadedData['mode'] == null) {
+      loadedData['mode'] = 'smart';
     }
 
     setState(() {
@@ -320,6 +326,66 @@ class _SensorConfigPageState extends State<SensorConfigPage> {
           ),
           const SizedBox(height: 20),
 
+          // Mode Selection
+          Text(
+            'Mode Penyiraman',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppColor.textDark,
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: [
+                RadioListTile<String>(
+                  title: const Text(
+                    'Smart Mode (Adaptif)',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: const Text(
+                    'Siram hingga batas atas tercapai atau timeout',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  value: 'smart',
+                  groupValue: _sensorConfig['mode'],
+                  onChanged: (value) {
+                    setState(() {
+                      _sensorConfig['mode'] = value!;
+                    });
+                  },
+                  activeColor: AppColor.primary,
+                ),
+                Divider(height: 1, color: Colors.grey.shade300),
+                RadioListTile<String>(
+                  title: const Text(
+                    'Fixed Duration (Durasi Tetap)',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: const Text(
+                    'Siram selama durasi yang ditentukan',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  value: 'fixed',
+                  groupValue: _sensorConfig['mode'],
+                  onChanged: (value) {
+                    setState(() {
+                      _sensorConfig['mode'] = value!;
+                    });
+                  },
+                  activeColor: AppColor.primary,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
           // Batas Minimal
           _buildEditableField(
             label: 'Batas Minimal (%)',
@@ -344,14 +410,14 @@ class _SensorConfigPageState extends State<SensorConfigPage> {
           _buildEditableField(
             label: 'Durasi Penyiraman',
             value:
-                '${_sensorConfig['durasi']} ${_sensorConfig['durasiUnit'] ?? 'menit'}',
+                '${_sensorConfig['durasi']} ${_sensorConfig['durasiUnit'] ?? 'detik'}',
             onTap: () => _editDurationField(),
             icon: Icons.timer,
           ),
 
           const SizedBox(height: 20),
 
-          // Info box
+          // Info box - Dynamic based on mode
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -364,7 +430,9 @@ class _SensorConfigPageState extends State<SensorConfigPage> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Pompa akan aktif otomatis jika kelembaban di bawah batas minimal',
+                    _sensorConfig['mode'] == 'smart'
+                        ? 'Smart Mode: Pompa akan mati otomatis saat mencapai batas atas atau durasi habis sebagai safety timeout'
+                        : 'Fixed Duration: Pompa akan menyiram selama durasi yang ditentukan, tidak peduli nilai sensor',
                     style: TextStyle(fontSize: 12, color: AppColor.textDark),
                   ),
                 ),
@@ -566,13 +634,23 @@ class _SensorConfigPageState extends State<SensorConfigPage> {
       // Save to local storage
       await KontrolStorage.saveSensorConfig(widget.potName, _sensorConfig);
 
+      // Convert durasi to seconds for Firebase
+      int durasiSeconds = int.tryParse(_sensorConfig['durasi']) ?? 10;
+      if (_sensorConfig['durasiUnit'] == 'menit') {
+        durasiSeconds *= 60;
+      }
+
       // Update Firebase dengan konfigurasi sensor
       await _dbService.setThreshold(
         batasAtas: int.tryParse(_sensorConfig['batasMaksimal']) ?? 80,
         batasBawah: int.tryParse(_sensorConfig['batasMinimal']) ?? 30,
       );
 
-      await _dbService.updateKontrolConfig({'otomatis': _isSensorModeActive});
+      await _dbService.updateKontrolConfig({
+        'otomatis': _isSensorModeActive,
+        'durasi_sensor': durasiSeconds,
+        'mode_sensor': _sensorConfig['mode'] ?? 'smart',
+      });
 
       setState(() {
         _isSaved = true;

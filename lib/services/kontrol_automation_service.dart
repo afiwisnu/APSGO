@@ -172,9 +172,9 @@ class KontrolAutomationService {
     _isSensorModeActive = true;
     debugPrint('🌡️ Sensor Mode: Started');
 
-    // Monitor perubahan sensor setiap beberapa detik
+    // Monitor perubahan sensor lebih responsif (5 detik)
     _sensorCheckTimer = Timer.periodic(
-      const Duration(seconds: 10),
+      const Duration(seconds: 5),
       (timer) => _checkSensorThreshold(),
     );
 
@@ -209,21 +209,35 @@ class KontrolAutomationService {
 
       final batasAtas = kontrolConfig['batas_atas'] ?? 100;
       final batasBawah = kontrolConfig['batas_bawah'] ?? 40;
+      final durasiSensor = kontrolConfig['durasi_sensor'] ?? 60; // dalam detik
+      final modeSensor =
+          kontrolConfig['mode_sensor'] ?? 'smart'; // 'smart' or 'fixed'
 
       final sensorData = await _dbService.getSensorData();
 
       // Check setiap pot (soil_1 sampai soil_5)
+      debugPrint(
+        '🌡️ Checking thresholds: batas_bawah=$batasBawah, batas_atas=$batasAtas, mode=$modeSensor, durasi=${durasiSensor}s',
+      );
+
       for (int i = 1; i <= 5; i++) {
         final soilKey = 'soil_$i';
         final soilValue = int.tryParse(sensorData[soilKey] ?? '0') ?? 0;
 
+        debugPrint('🌡️ $soilKey = $soilValue (threshold: $batasBawah)');
+
         // Jika kelembapan di bawah batas bawah, siram pot tersebut
         if (soilValue < batasBawah) {
+          debugPrint(
+            '⚠️ $soilKey ($soilValue) < batasBawah ($batasBawah) → Triggering watering for POT $i',
+          );
           await _waterPotBySensor(
             potNumber: i,
             soilValue: soilValue,
             batasBawah: batasBawah,
             batasAtas: batasAtas,
+            durasiSeconds: durasiSensor,
+            mode: modeSensor,
           );
         }
       }
@@ -244,6 +258,8 @@ class KontrolAutomationService {
     required int soilValue,
     required int batasBawah,
     required int batasAtas,
+    required int durasiSeconds,
+    required String mode,
   }) async {
     final potKey = 'pot_$potNumber';
 
@@ -253,7 +269,12 @@ class KontrolAutomationService {
     final lastTime = _lastWateringTime[potKey];
     if (lastTime != null) {
       final diff = DateTime.now().difference(lastTime);
-      if (diff.inMinutes < 5) return; // Minimum 5 menit antar penyiraman
+      if (diff.inMinutes < 2) {
+        debugPrint(
+          '⏳ POT $potNumber: Cooldown active (${2 - diff.inMinutes} min remaining)',
+        );
+        return; // Minimum 2 menit antar penyiraman
+      }
     }
 
     try {
@@ -263,40 +284,98 @@ class KontrolAutomationService {
       debugPrint(
         '🌡️ Sensor Mode: Watering POT $potNumber (soil: $soilValue < $batasBawah)',
       );
+      debugPrint('🔧 Mode: $mode, Durasi: ${durasiSeconds}s');
 
       // Nyalakan pompa air dan valve pot tersebut
+      // pot 1 → mosvet_3, pot 2 → mosvet_4, ... pot 5 → mosvet_7
+      debugPrint(
+        '💧 Starting watering: POT $potNumber (mosvet_${potNumber + 2})',
+      );
       await _dbService.setPompaAir(true);
       await _dbService.setPot(potNumber, true);
 
-      // Siram sampai mencapai batas atas atau max 60 detik
       int elapsedSeconds = 0;
-      const maxDuration = 60;
 
-      while (elapsedSeconds < maxDuration && _isSensorModeActive) {
-        await Future.delayed(const Duration(seconds: 5));
-        elapsedSeconds += 5;
+      if (mode == 'smart') {
+        // SMART MODE: Siram sampai batas atas atau timeout
+        debugPrint(
+          '🧠 Smart Mode: Target soil_$potNumber >= $batasAtas (currently: $soilValue), max ${durasiSeconds}s',
+        );
 
-        // Check sensor lagi
-        final currentData = await _dbService.getSensorData();
-        final currentSoil =
-            int.tryParse(currentData['soil_$potNumber'] ?? '0') ?? 0;
+        while (elapsedSeconds < durasiSeconds && _isSensorModeActive) {
+          await Future.delayed(const Duration(seconds: 5));
+          elapsedSeconds += 5;
 
-        if (currentSoil >= batasAtas) {
+          // Check sensor lagi
+          final currentData = await _dbService.getSensorData();
+          final currentSoil =
+              int.tryParse(currentData['soil_$potNumber'] ?? '0') ?? 0;
+
           debugPrint(
-            '✅ POT $potNumber reached target: $currentSoil >= $batasAtas',
+            '💧 POT $potNumber watering: ${elapsedSeconds}s, soil_$potNumber: $currentSoil',
           );
-          break;
+
+          if (currentSoil >= batasAtas) {
+            debugPrint(
+              '✅ POT $potNumber reached target: $currentSoil >= $batasAtas (Smart Mode)',
+            );
+            break;
+          }
         }
+
+        if (elapsedSeconds >= durasiSeconds) {
+          debugPrint(
+            '⏰ POT $potNumber timeout: ${elapsedSeconds}s (Smart Mode safety)',
+          );
+        }
+      } else {
+        // FIXED DURATION MODE: Siram selama durasi tetap
+        debugPrint(
+          '⏱️ Fixed Duration Mode: Watering for exactly ${durasiSeconds}s',
+        );
+
+        while (elapsedSeconds < durasiSeconds && _isSensorModeActive) {
+          await Future.delayed(const Duration(seconds: 5));
+          elapsedSeconds += 5;
+
+          // Check sensor untuk logging saja (tidak break)
+          final currentData = await _dbService.getSensorData();
+          final currentSoil =
+              int.tryParse(currentData['soil_$potNumber'] ?? '0') ?? 0;
+
+          debugPrint(
+            '💧 POT $potNumber watering: ${elapsedSeconds}s/${durasiSeconds}s, soil_$potNumber: $currentSoil',
+          );
+        }
+
+        debugPrint(
+          '✅ POT $potNumber fixed duration completed: ${durasiSeconds}s',
+        );
       }
 
       // Matikan pompa dan valve
       await _dbService.setPompaAir(false);
       await _dbService.setPot(potNumber, false);
 
-      debugPrint('✅ Sensor Mode: Watering completed for POT $potNumber');
+      debugPrint(
+        '✅ Sensor Mode: Watering completed for POT $potNumber (${elapsedSeconds}s, mode: $mode)',
+      );
+
+      // Pastikan flag ter-reset dengan benar
+      await Future.delayed(const Duration(milliseconds: 500));
       _isWateringActive[potKey] = false;
     } catch (e) {
       debugPrint('❌ Error watering pot by sensor: $e');
+
+      // Matikan semua untuk safety
+      try {
+        await _dbService.setPompaAir(false);
+        await _dbService.setPot(potNumber, false);
+      } catch (cleanupError) {
+        debugPrint('❌ Error during cleanup: $cleanupError');
+      }
+
+      // Reset flag
       _isWateringActive[potKey] = false;
     }
   }

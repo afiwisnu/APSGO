@@ -15,12 +15,45 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   int _selectedIndex = 0;
   final _dbService = FirebaseDatabaseService();
+  final _authService = AuthService();
+  bool _isInitialized = false;
 
   final List<Map<String, dynamic>> _pages = [
     {'title': 'Dashboard', 'icon': Icons.dashboard},
     {'title': 'Kontrol', 'icon': Icons.settings_remote},
     {'title': 'Histori', 'icon': Icons.history},
   ];
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Verify user is logged in on init
+    if (_authService.currentUser == null) {
+      // If no user, redirect immediately
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Navigator.of(
+            context,
+          ).pushNamedAndRemoveUntil('/login', (route) => false);
+        }
+      });
+      return;
+    }
+
+    _isInitialized = true;
+
+    // Monitor auth state untuk mencegah logout tidak terduga
+    // Hanya trigger jika sudah initialized dan user jadi null
+    _authService.authStateChanges.listen((user) {
+      if (_isInitialized && user == null && mounted) {
+        // User logged out, redirect to login
+        Navigator.of(
+          context,
+        ).pushNamedAndRemoveUntil('/login', (route) => false);
+      }
+    });
+  }
 
   Future<void> _handleLogout(BuildContext context) async {
     final confirmed = await showDialog<bool>(

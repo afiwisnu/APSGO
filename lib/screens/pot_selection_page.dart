@@ -25,15 +25,26 @@ class _PotSelectionPageState extends State<PotSelectionPage> {
   }
 
   Future<void> _loadModeStatus() async {
-    final isActive =
-        widget.mode == 'Waktu'
-            ? await KontrolStorage.loadWaktuModeActive()
-            : await KontrolStorage.loadSensorModeActive();
+    try {
+      final isActive =
+          widget.mode == 'Waktu'
+              ? await KontrolStorage.loadWaktuModeActive()
+              : await KontrolStorage.loadSensorModeActive();
 
-    setState(() {
-      _isModeActive = isActive;
-      _isLoading = false;
-    });
+      if (mounted) {
+        setState(() {
+          _isModeActive = isActive;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading mode status: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   Future<void> _toggleMode(bool value) async {

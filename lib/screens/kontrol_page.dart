@@ -121,12 +121,13 @@ class _ManualControlPageState extends State<ManualControlPage> {
   // POT switches (5 POTs now)
   List<bool> _potStatus = [false, false, false, false, false];
   bool _isLoading = true;
+  bool _hasLocalChanges = false; // Track jika ada perubahan lokal
 
   @override
   void initState() {
     super.initState();
     _loadFirebaseState();
-    _listenToFirebaseChanges();
+    // Tidak listen real-time changes agar tidak menimpa perubahan lokal user
   }
 
   /// Load initial state from Firebase
@@ -145,31 +146,22 @@ class _ManualControlPageState extends State<ManualControlPage> {
             aktuatorData['mosvet_7'] ?? false,
           ];
           _isLoading = false;
+          _hasLocalChanges = false;
         });
       }
     } catch (e) {
       print('Error loading Firebase state: $e');
-      setState(() => _isLoading = false);
-    }
-  }
-
-  /// Listen to real-time Firebase changes
-  void _listenToFirebaseChanges() {
-    _dbService.getAktuatorStream().listen((aktuatorData) {
       if (mounted) {
-        setState(() {
-          _pompaAir = aktuatorData['mosvet_1'] ?? false;
-          _pompaNutrisi = aktuatorData['mosvet_2'] ?? false;
-          _potStatus = [
-            aktuatorData['mosvet_3'] ?? false,
-            aktuatorData['mosvet_4'] ?? false,
-            aktuatorData['mosvet_5'] ?? false,
-            aktuatorData['mosvet_6'] ?? false,
-            aktuatorData['mosvet_7'] ?? false,
-          ];
-        });
+        setState(() => _isLoading = false);
+        // Tampilkan snackbar tapi jangan crash
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal memuat data: $e'),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
-    });
+    }
   }
 
   Future<void> _jalankan() async {
@@ -192,6 +184,11 @@ class _ManualControlPageState extends State<ManualControlPage> {
         pots: _potStatus,
       );
 
+      // Reset flag perubahan lokal
+      setState(() {
+        _hasLocalChanges = false;
+      });
+
       // Show which devices are running
       List<String> activeDevices = [];
       if (_pompaAir) activeDevices.add('Pompa Air');
@@ -210,7 +207,7 @@ class _ManualControlPageState extends State<ManualControlPage> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✓ Berhasil: ${activeDevices.join(', ')}'),
+            content: Text('✓ Berhasil dijalankan: ${activeDevices.join(', ')}'),
             backgroundColor: AppColor.primary,
             duration: const Duration(seconds: 3),
           ),
@@ -236,37 +233,21 @@ class _ManualControlPageState extends State<ManualControlPage> {
           ControlSwitchCard(
             title: 'Pompa Air',
             isActive: _pompaAir,
-            onPressed: () async {
-              setState(() => _pompaAir = !_pompaAir);
-              try {
-                await _dbService.setPompaAir(_pompaAir);
-              } catch (e) {
-                setState(() => _pompaAir = !_pompaAir);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Error: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
+            onPressed: () {
+              setState(() {
+                _pompaAir = !_pompaAir;
+                _hasLocalChanges = true;
+              });
             },
           ),
           ControlSwitchCard(
             title: 'Pompa Nutrisi',
             isActive: _pompaNutrisi,
-            onPressed: () async {
-              setState(() => _pompaNutrisi = !_pompaNutrisi);
-              try {
-                await _dbService.setPompaPupuk(_pompaNutrisi);
-              } catch (e) {
-                setState(() => _pompaNutrisi = !_pompaNutrisi);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Error: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
+            onPressed: () {
+              setState(() {
+                _pompaNutrisi = !_pompaNutrisi;
+                _hasLocalChanges = true;
+              });
             },
           ),
 
@@ -291,39 +272,77 @@ class _ManualControlPageState extends State<ManualControlPage> {
             return ControlSwitchCard(
               title: 'POT ${index + 1}',
               isActive: _potStatus[index],
-              onPressed: () async {
-                setState(() => _potStatus[index] = !_potStatus[index]);
-                try {
-                  await _dbService.setPot(index + 1, _potStatus[index]);
-                } catch (e) {
-                  setState(() => _potStatus[index] = !_potStatus[index]);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Error: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
+              onPressed: () {
+                setState(() {
+                  _potStatus[index] = !_potStatus[index];
+                  _hasLocalChanges = true;
+                });
               },
             );
           }),
 
           const SizedBox(height: 24),
+
+          // Info text jika ada perubahan lokal
+          if (_hasLocalChanges)
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade300),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: Colors.orange.shade700,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Ada perubahan yang belum disimpan',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.orange.shade700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               onPressed: _jalankan,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColor.primary,
+                backgroundColor:
+                    _hasLocalChanges ? AppColor.primary : Colors.grey,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.all(16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
-              child: const Text(
-                'Jalankan',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (_hasLocalChanges)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 8),
+                      child: Icon(Icons.send, size: 18),
+                    ),
+                  Text(
+                    _hasLocalChanges ? 'Jalankan Sekarang' : 'Jalankan',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

@@ -54,34 +54,45 @@ class _WaktuConfigPageState extends State<WaktuConfigPage> {
   }
 
   Future<void> _loadSavedConfig() async {
-    final loadedData = await KontrolStorage.loadWaktuConfig(widget.potName);
+    try {
+      final loadedData = await KontrolStorage.loadWaktuConfig(widget.potName);
 
-    // Convert old format to new format if needed
-    for (var jadwal in loadedData) {
-      if (jadwal['durasi'] is String) {
-        final durasiStr = jadwal['durasi'] as String;
-        // Check if it contains unit (e.g., "10 menit")
-        if (durasiStr.contains(' ')) {
-          final parts = durasiStr.split(' ');
-          jadwal['durasi'] = parts[0]; // Extract number
-          jadwal['durasiUnit'] =
-              parts.length > 1 ? parts[1] : 'menit'; // Extract unit
-        } else {
-          // If no unit, ensure durasiUnit exists
-          jadwal['durasiUnit'] = jadwal['durasiUnit'] ?? 'menit';
+      // Convert old format to new format if needed
+      for (var jadwal in loadedData) {
+        if (jadwal['durasi'] is String) {
+          final durasiStr = jadwal['durasi'] as String;
+          // Check if it contains unit (e.g., "10 menit")
+          if (durasiStr.contains(' ')) {
+            final parts = durasiStr.split(' ');
+            jadwal['durasi'] = parts[0]; // Extract number
+            jadwal['durasiUnit'] =
+                parts.length > 1 ? parts[1] : 'menit'; // Extract unit
+          } else {
+            // If no unit, ensure durasiUnit exists
+            jadwal['durasiUnit'] = jadwal['durasiUnit'] ?? 'menit';
+          }
         }
       }
-    }
 
-    setState(() {
-      _jadwalPenyiraman = loadedData;
-      _isLoading = false;
-      // Check if data was previously saved
-      _isSaved =
-          loadedData[0]['jamMulai'] != '08:00' ||
-          loadedData[0]['pompaAir'] ||
-          loadedData[0]['pompaPupuk'];
-    });
+      if (mounted) {
+        setState(() {
+          _jadwalPenyiraman = loadedData;
+          _isLoading = false;
+          // Check if data was previously saved
+          _isSaved =
+              loadedData[0]['jamMulai'] != '08:00' ||
+              loadedData[0]['pompaAir'] ||
+              loadedData[0]['pompaPupuk'];
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading waktu config: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadWaktuModeStatus() async {
