@@ -117,6 +117,7 @@ class _ManualControlPageState extends State<ManualControlPage> {
 
   bool _pompaAir = false;
   bool _pompaNutrisi = false;
+  bool _pengaduk = false; // Motor pengaduk (mosvet_8)
 
   // POT switches (5 POTs now)
   List<bool> _potStatus = [false, false, false, false, false];
@@ -138,6 +139,7 @@ class _ManualControlPageState extends State<ManualControlPage> {
         setState(() {
           _pompaAir = aktuatorData['mosvet_1'] ?? false;
           _pompaNutrisi = aktuatorData['mosvet_2'] ?? false;
+          _pengaduk = aktuatorData['mosvet_8'] ?? false;
           _potStatus = [
             aktuatorData['mosvet_3'] ?? false,
             aktuatorData['mosvet_4'] ?? false,
@@ -175,6 +177,7 @@ class _ManualControlPageState extends State<ManualControlPage> {
         'mosvet_5': _potStatus[2],
         'mosvet_6': _potStatus[3],
         'mosvet_7': _potStatus[4],
+        'mosvet_8': _pengaduk,
       });
 
       // Also save to local storage as backup
@@ -193,6 +196,7 @@ class _ManualControlPageState extends State<ManualControlPage> {
       List<String> activeDevices = [];
       if (_pompaAir) activeDevices.add('Pompa Air');
       if (_pompaNutrisi) activeDevices.add('Pompa Nutrisi');
+      if (_pengaduk) activeDevices.add('Pengaduk');
       for (int i = 0; i < _potStatus.length; i++) {
         if (_potStatus[i]) activeDevices.add('POT ${i + 1}');
       }
@@ -246,6 +250,16 @@ class _ManualControlPageState extends State<ManualControlPage> {
             onPressed: () {
               setState(() {
                 _pompaNutrisi = !_pompaNutrisi;
+                _hasLocalChanges = true;
+              });
+            },
+          ),
+          ControlSwitchCard(
+            title: 'Pengaduk',
+            isActive: _pengaduk,
+            onPressed: () {
+              setState(() {
+                _pengaduk = !_pengaduk;
                 _hasLocalChanges = true;
               });
             },

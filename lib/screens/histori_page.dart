@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_color.dart';
+import '../services/firebase_database_service.dart';
+import '../services/history_logging_service.dart';
 
 class HistoriPage extends StatefulWidget {
   const HistoriPage({super.key});
@@ -9,9 +11,16 @@ class HistoriPage extends StatefulWidget {
 }
 
 class _HistoriPageState extends State<HistoriPage> {
+  final FirebaseDatabaseService _dbService = FirebaseDatabaseService();
+  final HistoryLoggingService _loggingService = HistoryLoggingService();
+
   DateTime? _startDate;
   DateTime? _endDate;
   String _selectedPot = 'Semua Pot';
+  bool _isLoading = false;
+
+  Map<String, double> _averages = {};
+  Map<String, Map<String, double>> _potAverages = {};
 
   final List<String> _potOptions = [
     'Semua Pot',
@@ -22,20 +31,161 @@ class _HistoriPageState extends State<HistoriPage> {
     'Pot 5',
   ];
 
-  // Data dummy untuk monitoring
-  final Map<String, Map<String, double>> _potAverages = {
-    'Pot 1': {'temp': 28.5, 'humidity': 65.3, 'soil': 45.2, 'light': 82.1},
-    'Pot 2': {'temp': 29.1, 'humidity': 68.7, 'soil': 52.8, 'light': 85.3},
-    'Pot 3': {'temp': 27.8, 'humidity': 63.2, 'soil': 38.5, 'light': 79.6},
-    'Pot 4': {'temp': 30.2, 'humidity': 71.5, 'soil': 61.3, 'light': 88.2},
-    'Pot 5': {'temp': 28.9, 'humidity': 66.8, 'soil': 48.7, 'light': 83.9},
-  };
+  @override
+  void initState() {
+    super.initState();
+    // Start logging service if not already running
+    if (!_loggingService.isActive) {
+      _loggingService.start();
+    }
+    // Load initial data (last 7 days)
+    _loadDefaultData();
+  }
+
+  Future<void> _loadDefaultData() async {
+    final endDate = DateTime.now();
+    final startDate = endDate.subtract(const Duration(days: 7));
+
+    setState(() {
+      _startDate = startDate;
+      _endDate = endDate;
+    });
+
+    await _loadHistoryData();
+  }
+
+  Future<void> _loadHistoryData() async {
+    if (_startDate == null || _endDate == null) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final data = await _dbService.getHistoryByDateRange(
+        _startDate!,
+        _endDate!,
+      );
+
+      if (data.isEmpty) {
+        // No history yet, use current data
+        final currentData = await _dbService.getSensorData();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Belum ada data histori. Menampilkan data saat ini.',
+              ),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        _calculateAveragesFromCurrent(currentData);
+      } else {
+        _calculateAverages(data);
+      }
+
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading history: $e');
+      setState(() {
+        _isLoading = false;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  void _calculateAverages(Map<String, dynamic> historyData) {
+    double totalTemp = 0;
+    double totalHumidity = 0;
+    double totalLdr = 0;
+    Map<int, double> totalSoil = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0};
+    int count = 0;
+    Map<int, int> soilCount = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0};
+
+    historyData.forEach((dateKey, dateData) {
+      if (dateData is Map) {
+        dateData.forEach((timeKey, timeData) {
+          if (timeData is Map) {
+            count++;
+
+            totalTemp +=
+                double.tryParse(timeData['suhu']?.toString() ?? '0') ?? 0;
+            totalHumidity +=
+                double.tryParse(timeData['kelembapan']?.toString() ?? '0') ?? 0;
+            totalLdr +=
+                double.tryParse(timeData['ldr']?.toString() ?? '0') ?? 0;
+
+            for (int i = 1; i <= 5; i++) {
+              final soil =
+                  double.tryParse(timeData['soil_$i']?.toString() ?? '0') ?? 0;
+              if (soil > 0) {
+                totalSoil[i] = (totalSoil[i] ?? 0) + soil;
+                soilCount[i] = (soilCount[i] ?? 0) + 1;
+              }
+            }
+          }
+        });
+      }
+    });
+
+    if (count > 0) {
+      _averages = {
+        'temp': totalTemp / count,
+        'humidity': totalHumidity / count,
+        'ldr': totalLdr / count,
+      };
+
+      _potAverages = {};
+      for (int i = 1; i <= 5; i++) {
+        final potCount = soilCount[i] ?? 0;
+        _potAverages['Pot $i'] = {
+          'temp': totalTemp / count,
+          'humidity': totalHumidity / count,
+          'soil': potCount > 0 ? (totalSoil[i] ?? 0) / potCount : 0,
+          'light': totalLdr / count,
+        };
+      }
+    }
+  }
+
+  void _calculateAveragesFromCurrent(Map<String, dynamic> currentData) {
+    _averages = {
+      'temp': double.tryParse(currentData['suhu']?.toString() ?? '0') ?? 0,
+      'humidity':
+          double.tryParse(currentData['kelembapan']?.toString() ?? '0') ?? 0,
+      'ldr': double.tryParse(currentData['ldr']?.toString() ?? '0') ?? 0,
+    };
+
+    _potAverages = {};
+    for (int i = 1; i <= 5; i++) {
+      final soil =
+          double.tryParse(currentData['soil_$i']?.toString() ?? '0') ?? 0;
+      _potAverages['Pot $i'] = {
+        'temp': _averages['temp']!,
+        'humidity': _averages['humidity']!,
+        'soil': soil,
+        'light': _averages['ldr']!,
+      };
+    }
+  }
 
   Future<void> _selectDateRange() async {
     final DateTimeRange? picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
+      initialDateRange:
+          _startDate != null && _endDate != null
+              ? DateTimeRange(start: _startDate!, end: _endDate!)
+              : null,
       builder: (context, child) {
         return Theme(
           data: Theme.of(
@@ -51,6 +201,9 @@ class _HistoriPageState extends State<HistoriPage> {
         _startDate = picked.start;
         _endDate = picked.end;
       });
+
+      // Reload data with new date range
+      await _loadHistoryData();
     }
   }
 
@@ -61,12 +214,45 @@ class _HistoriPageState extends State<HistoriPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Hasil Monitoring',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: AppColor.textDark,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Hasil Monitoring',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppColor.textDark,
+                ),
+              ),
+              // Manual refresh button
+              IconButton(
+                icon: Icon(Icons.refresh, color: AppColor.primary),
+                onPressed: _isLoading ? null : _loadHistoryData,
+                tooltip: 'Refresh data',
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          // Info text
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.blue.shade700, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Data disimpan setiap ${_loggingService.interval.inMinutes} menit',
+                    style: TextStyle(fontSize: 12, color: Colors.blue.shade700),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
@@ -164,40 +350,43 @@ class _HistoriPageState extends State<HistoriPage> {
           ),
           const SizedBox(height: 20),
 
-          // Overall Averages Section
-          Text(
-            'Rata-Rata Keseluruhan',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: AppColor.textDark,
+          // Loading indicator
+          if (_isLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(32.0),
+                child: CircularProgressIndicator(),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          _buildAverageCard(
-            title: 'Suhu Rata-Rata',
-            value: '28.9 °C',
-            icon: Icons.thermostat_outlined,
-            color: Colors.orange,
-          ),
-          _buildAverageCard(
-            title: 'Kelembaban Udara Rata-Rata',
-            value: '67.1 %',
-            icon: Icons.water_drop_outlined,
-            color: Colors.blue,
-          ),
-          _buildAverageCard(
-            title: 'LDR Rata-Rata',
-            value: '83.8',
-            icon: Icons.wb_sunny_outlined,
-            color: Colors.amber,
-          ),
-          const SizedBox(height: 20),
 
-          // Per Pot Averages
-          if (_selectedPot != 'Semua Pot') ...[
+          // Data display
+          if (!_isLoading && _averages.isEmpty)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32.0),
+                child: Column(
+                  children: [
+                    Icon(Icons.history, size: 64, color: Colors.grey[400]),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Belum ada data histori',
+                      style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Data akan tersimpan otomatis setiap ${_loggingService.interval.inMinutes} menit',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Overall Averages Section
+          if (!_isLoading && _averages.isNotEmpty) ...[
             Text(
-              'Rata-Rata $_selectedPot',
+              'Rata-Rata Keseluruhan',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -205,18 +394,52 @@ class _HistoriPageState extends State<HistoriPage> {
               ),
             ),
             const SizedBox(height: 12),
-            _buildPotAverageCard(_selectedPot),
-          ] else ...[
-            Text(
-              'Rata-Rata Per Pot',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: AppColor.textDark,
-              ),
+            _buildAverageCard(
+              title: 'Suhu Rata-Rata',
+              value: '${_averages['temp']?.toStringAsFixed(1) ?? '0'} °C',
+              icon: Icons.thermostat_outlined,
+              color: Colors.orange,
             ),
-            const SizedBox(height: 12),
-            ..._potAverages.keys.map((pot) => _buildPotAverageCard(pot)),
+            _buildAverageCard(
+              title: 'Kelembaban Udara Rata-Rata',
+              value: '${_averages['humidity']?.toStringAsFixed(1) ?? '0'} %',
+              icon: Icons.water_drop_outlined,
+              color: Colors.blue,
+            ),
+            _buildAverageCard(
+              title: 'LDR Rata-Rata',
+              value: _averages['ldr']?.toStringAsFixed(1) ?? '0',
+              icon: Icons.wb_sunny_outlined,
+              color: Colors.amber,
+            ),
+            const SizedBox(height: 20),
+
+            // Per Pot Averages
+            if (_selectedPot != 'Semua Pot' &&
+                _potAverages.containsKey(_selectedPot)) ...[
+              Text(
+                'Rata-Rata $_selectedPot',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColor.textDark,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildPotAverageCard(_selectedPot),
+            ] else if (_selectedPot == 'Semua Pot' &&
+                _potAverages.isNotEmpty) ...[
+              Text(
+                'Rata-Rata Per Pot',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColor.textDark,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ..._potAverages.keys.map((pot) => _buildPotAverageCard(pot)),
+            ],
           ],
         ],
       ),
@@ -265,7 +488,9 @@ class _HistoriPageState extends State<HistoriPage> {
   }
 
   Widget _buildPotAverageCard(String potName) {
-    final data = _potAverages[potName]!;
+    final data = _potAverages[potName];
+    if (data == null) return const SizedBox.shrink();
+
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.only(bottom: 12),
@@ -293,28 +518,28 @@ class _HistoriPageState extends State<HistoriPage> {
               children: [
                 _buildDetailRow(
                   'Suhu',
-                  '${data['temp']} °C',
+                  '${data['temp']?.toStringAsFixed(1) ?? '0'} °C',
                   Icons.thermostat,
                   Colors.orange,
                 ),
                 const Divider(),
                 _buildDetailRow(
                   'Kelembaban',
-                  '${data['humidity']} %',
+                  '${data['humidity']?.toStringAsFixed(1) ?? '0'} %',
                   Icons.water_drop,
                   Colors.blue,
                 ),
                 const Divider(),
                 _buildDetailRow(
                   'Soil Moisture',
-                  '${data['soil']} %',
+                  '${data['soil']?.toStringAsFixed(1) ?? '0'} %',
                   Icons.grass,
                   Colors.green,
                 ),
                 const Divider(),
                 _buildDetailRow(
                   'Light',
-                  '${data['light']}',
+                  data['light']?.toStringAsFixed(1) ?? '0',
                   Icons.wb_sunny,
                   Colors.amber,
                 ),

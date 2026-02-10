@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'firebase_database_service.dart';
+import 'automation_constants.dart';
+import 'connection_monitor_service.dart';
 
 /// Service untuk menghandle logika otomatis kontrol waktu dan sensor
 /// Berjalan di background untuk monitoring dan eksekusi otomatis
@@ -11,6 +13,8 @@ class KontrolAutomationService {
   KontrolAutomationService._internal();
 
   final FirebaseDatabaseService _dbService = FirebaseDatabaseService();
+  final ConnectionMonitorService _connectionMonitor =
+      ConnectionMonitorService();
 
   Timer? _waktuCheckTimer;
   Timer? _sensorCheckTimer;
@@ -31,12 +35,15 @@ class KontrolAutomationService {
   void startWaktuMode() {
     if (_isWaktuModeActive) return;
 
+    // Start connection monitor
+    _connectionMonitor.start();
+
     _isWaktuModeActive = true;
     debugPrint('🕐 Waktu Mode: Started');
 
-    // Cek setiap 30 detik
+    // Cek setiap 30 detik (gunakan constant)
     _waktuCheckTimer = Timer.periodic(
-      const Duration(seconds: 30),
+      Duration(seconds: AutomationConstants.waktuCheckInterval),
       (timer) => _checkScheduledWatering(),
     );
 
@@ -55,6 +62,12 @@ class KontrolAutomationService {
   /// Check apakah ada jadwal penyiraman yang harus dijalankan
   Future<void> _checkScheduledWatering() async {
     try {
+      // Check connection first
+      if (!_connectionMonitor.isConnected) {
+        debugPrint('⚠️ No Firebase connection, skipping schedule check');
+        return;
+      }
+
       final kontrolConfig = await _dbService.getKontrolConfig();
       final waktuEnabled = kontrolConfig['waktu'] ?? false;
 
@@ -66,8 +79,10 @@ class KontrolAutomationService {
 
       final waktu1 = kontrolConfig['waktu_1'] ?? '';
       final waktu2 = kontrolConfig['waktu_2'] ?? '';
-      final durasi1 = kontrolConfig['durasi_1'] ?? 60; // detik
-      final durasi2 = kontrolConfig['durasi_2'] ?? 60; // detik
+      final durasi1 =
+          kontrolConfig['durasi_1'] ?? AutomationConstants.defaultDurasiDetik;
+      final durasi2 =
+          kontrolConfig['durasi_2'] ?? AutomationConstants.defaultDurasiDetik;
 
       // Check Jadwal 1
       if (waktu1.isNotEmpty &&
@@ -169,12 +184,15 @@ class KontrolAutomationService {
   void startSensorMode() {
     if (_isSensorModeActive) return;
 
+    // Start connection monitor
+    _connectionMonitor.start();
+
     _isSensorModeActive = true;
     debugPrint('🌡️ Sensor Mode: Started');
 
-    // Monitor perubahan sensor lebih responsif (5 detik)
+    // Monitor perubahan sensor lebih responsif (gunakan constant)
     _sensorCheckTimer = Timer.periodic(
-      const Duration(seconds: 5),
+      Duration(seconds: AutomationConstants.sensorCheckInterval),
       (timer) => _checkSensorThreshold(),
     );
 
@@ -202,16 +220,26 @@ class KontrolAutomationService {
   /// Check sensor threshold untuk semua pot
   Future<void> _checkSensorThreshold() async {
     try {
+      // Check connection first
+      if (!_connectionMonitor.isConnected) {
+        debugPrint('⚠️ No Firebase connection, skipping sensor check');
+        return;
+      }
+
       final kontrolConfig = await _dbService.getKontrolConfig();
       final otomatisEnabled = kontrolConfig['otomatis'] ?? false;
 
       if (!otomatisEnabled || !_isSensorModeActive) return;
 
-      final batasAtas = kontrolConfig['batas_atas'] ?? 100;
-      final batasBawah = kontrolConfig['batas_bawah'] ?? 40;
-      final durasiSensor = kontrolConfig['durasi_sensor'] ?? 60; // dalam detik
+      final batasAtas =
+          kontrolConfig['batas_atas'] ?? AutomationConstants.defaultBatasAtas;
+      final batasBawah =
+          kontrolConfig['batas_bawah'] ?? AutomationConstants.defaultBatasBawah;
+      final durasiSensor =
+          kontrolConfig['durasi_sensor'] ??
+          AutomationConstants.defaultDurasiDetik;
       final modeSensor =
-          kontrolConfig['mode_sensor'] ?? 'smart'; // 'smart' or 'fixed'
+          kontrolConfig['mode_sensor'] ?? AutomationConstants.modeSensorFixed;
 
       final sensorData = await _dbService.getSensorData();
 
@@ -220,7 +248,7 @@ class KontrolAutomationService {
         '🌡️ Checking thresholds: batas_bawah=$batasBawah, batas_atas=$batasAtas, mode=$modeSensor, durasi=${durasiSensor}s',
       );
 
-      for (int i = 1; i <= 5; i++) {
+      for (int i = 1; i <= AutomationConstants.totalPots; i++) {
         final soilKey = 'soil_$i';
         final soilValue = int.tryParse(sensorData[soilKey] ?? '0') ?? 0;
 
@@ -269,11 +297,12 @@ class KontrolAutomationService {
     final lastTime = _lastWateringTime[potKey];
     if (lastTime != null) {
       final diff = DateTime.now().difference(lastTime);
-      if (diff.inMinutes < 2) {
+      final cooldownSeconds = AutomationConstants.wateringCooldownSeconds;
+      if (diff.inSeconds < cooldownSeconds) {
         debugPrint(
-          '⏳ POT $potNumber: Cooldown active (${2 - diff.inMinutes} min remaining)',
+          '⏳ POT $potNumber: Cooldown active (${cooldownSeconds - diff.inSeconds}s remaining)',
         );
-        return; // Minimum 2 menit antar penyiraman
+        return; // Minimum cooldown antar penyiraman
       }
     }
 

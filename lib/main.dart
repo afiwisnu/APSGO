@@ -4,13 +4,66 @@ import 'firebase_options.dart';
 import 'screens/landing_page.dart';
 import 'screens/login_page.dart';
 import 'theme/app_color.dart';
+import 'services/history_logging_service.dart';
+import 'services/kontrol_automation_service.dart';
 
 void main() {
+  // Start history logging service as soon as app starts
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // App kembali ke foreground
+        print('📱 App resumed - services will auto-start when needed');
+        break;
+      case AppLifecycleState.inactive:
+        // App temporary inactive (misal: phone call)
+        print('📱 App inactive');
+        break;
+      case AppLifecycleState.paused:
+        // App di background, stop services untuk hemat battery
+        print('📱 App paused - stopping background services');
+        HistoryLoggingService().stop();
+        KontrolAutomationService().stopAll();
+        break;
+      case AppLifecycleState.detached:
+        // App akan di-terminate
+        print('📱 App detaching - cleanup services');
+        HistoryLoggingService().dispose();
+        KontrolAutomationService().dispose();
+        break;
+      case AppLifecycleState.hidden:
+        // App hidden (new in Flutter 3.13+)
+        print('📱 App hidden');
+        break;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +79,7 @@ class MyApp extends StatelessWidget {
       routes: {'/login': (context) => const LoginPage()},
     );
   }
-} 
+}
 
 class FirebaseInitializer extends StatefulWidget {
   const FirebaseInitializer({super.key});
@@ -55,6 +108,11 @@ class _FirebaseInitializerState extends State<FirebaseInitializer> {
         _initialized = true;
       });
       print('✅ Firebase initialized successfully');
+
+      // Start history logging service after Firebase is initialized
+      final loggingService = HistoryLoggingService();
+      loggingService.start();
+      print('✅ History logging service started');
     } on FirebaseException catch (e) {
       // Jika app sudah ada, anggap sudah initialized
       if (e.code == 'duplicate-app') {
@@ -62,6 +120,11 @@ class _FirebaseInitializerState extends State<FirebaseInitializer> {
           _initialized = true;
         });
         print('✅ Firebase already initialized');
+
+        // Start logging service
+        final loggingService = HistoryLoggingService();
+        loggingService.start();
+        print('✅ History logging service started');
       } else {
         setState(() {
           _error = true;

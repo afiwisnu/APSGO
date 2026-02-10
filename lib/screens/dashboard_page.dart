@@ -17,6 +17,7 @@ class _DashboardPageState extends State<DashboardPage> {
   final _dbService = FirebaseDatabaseService();
   final _authService = AuthService();
   bool _isInitialized = false;
+  StreamSubscription? _authSubscription;
 
   final List<Map<String, dynamic>> _pages = [
     {'title': 'Dashboard', 'icon': Icons.dashboard},
@@ -45,7 +46,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     // Monitor auth state untuk mencegah logout tidak terduga
     // Hanya trigger jika sudah initialized dan user jadi null
-    _authService.authStateChanges.listen((user) {
+    _authSubscription = _authService.authStateChanges.listen((user) {
       if (_isInitialized && user == null && mounted) {
         // User logged out, redirect to login
         Navigator.of(
@@ -53,6 +54,12 @@ class _DashboardPageState extends State<DashboardPage> {
         ).pushNamedAndRemoveUntil('/login', (route) => false);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _handleLogout(BuildContext context) async {

@@ -68,6 +68,7 @@ class FirebaseDatabaseService {
           'mosvet_5': data['mosvet_5'] ?? false, // Valve 3
           'mosvet_6': data['mosvet_6'] ?? false, // Valve 4
           'mosvet_7': data['mosvet_7'] ?? false, // Valve 5
+          'mosvet_8': data['mosvet_8'] ?? false, // Pengaduk
         };
       }
       return {};
@@ -92,6 +93,11 @@ class FirebaseDatabaseService {
   /// Set pompa pupuk (mosvet_2)
   Future<void> setPompaPupuk(bool value) async {
     await setAktuator('mosvet_2', value);
+  }
+
+  /// Set pengaduk/motor (mosvet_8)
+  Future<void> setPengaduk(bool value) async {
+    await setAktuator('mosvet_8', value);
   }
 
   /// Set pot/valve (mosvet_3 to mosvet_7 untuk POT 1-5)
@@ -123,6 +129,7 @@ class FirebaseDatabaseService {
       'mosvet_5': false,
       'mosvet_6': false,
       'mosvet_7': false,
+      'mosvet_8': false,
     });
   }
 
@@ -233,5 +240,108 @@ class FirebaseDatabaseService {
     return _database.child('.info/connected').onValue.map((event) {
       return event.snapshot.value as bool? ?? false;
     });
+  }
+
+  // ==================== HISTORY LOGGING ====================
+
+  /// Save sensor data snapshot to history
+  Future<void> saveHistory(Map<String, dynamic> sensorData) async {
+    try {
+      final now = DateTime.now();
+      final dateKey =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final timeKey =
+          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+      await _database.child('history/$dateKey/$timeKey').set({
+        ...sensorData,
+        'timestamp': now.millisecondsSinceEpoch,
+      });
+    } catch (e) {
+      print('Error saving history: $e');
+    }
+  }
+
+  /// Get history data for a specific date range
+  Future<Map<String, dynamic>> getHistoryByDateRange(
+    DateTime startDate,
+    DateTime endDate,
+  ) async {
+    try {
+      final allHistory = <String, dynamic>{};
+
+      // Loop through each day in the range
+      for (
+        var date = startDate;
+        date.isBefore(endDate.add(const Duration(days: 1)));
+        date = date.add(const Duration(days: 1))
+      ) {
+        final dateKey =
+            '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+        final snapshot = await _database.child('history/$dateKey').get();
+        if (snapshot.exists) {
+          allHistory[dateKey] = snapshot.value;
+        }
+      }
+
+      return allHistory;
+    } catch (e) {
+      print('Error getting history: $e');
+      return {};
+    }
+  }
+
+  /// Get latest history entries (limit)
+  Future<Map<String, dynamic>> getLatestHistory({int limit = 100}) async {
+    try {
+      final snapshot =
+          await _database
+              .child('history')
+              .orderByKey()
+              .limitToLast(limit)
+              .get();
+
+      if (snapshot.exists) {
+        return Map<String, dynamic>.from(snapshot.value as Map);
+      }
+    } catch (e) {
+      print('Error getting latest history: $e');
+    }
+    return {};
+  }
+
+  /// Clear old history data (older than X days)
+  Future<void> clearOldHistory({int daysToKeep = 30}) async {
+    try {
+      final cutoffDate = DateTime.now().subtract(Duration(days: daysToKeep));
+      final snapshot = await _database.child('history').get();
+
+      if (snapshot.exists) {
+        final data = Map<String, dynamic>.from(snapshot.value as Map);
+
+        for (var dateKey in data.keys) {
+          try {
+            final parts = dateKey.split('-');
+            if (parts.length == 3) {
+              final date = DateTime(
+                int.parse(parts[0]),
+                int.parse(parts[1]),
+                int.parse(parts[2]),
+              );
+
+              if (date.isBefore(cutoffDate)) {
+                await _database.child('history/$dateKey').remove();
+                print('Deleted old history: $dateKey');
+              }
+            }
+          } catch (e) {
+            print('Error parsing date key $dateKey: $e');
+          }
+        }
+      }
+    } catch (e) {
+      print('Error clearing old history: $e');
+    }
   }
 }
